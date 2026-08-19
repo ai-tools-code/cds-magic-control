@@ -9,6 +9,8 @@ const DEFAULT_SETTINGS = {
   product_letters:{name:'MARK'}
 };
 
+let schemaReadyPromise = null;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -17,11 +19,13 @@ export default {
       if (url.pathname === '/api/run' && request.method === 'GET') return runEffectAPI(request, env);
       if (url.pathname === '/api/peek' && request.method === 'POST') return receivePeek(request, env);
       if (url.pathname.startsWith('/media/') && request.method === 'GET') return serveMedia(request, env);
+      if (url.pathname === '/api/admin/status' && request.method === 'GET') return adminStatus(env);
       if (url.pathname === '/api/admin/login' && request.method === 'POST') return adminLogin(request, env);
       if (url.pathname === '/api/admin/logout' && request.method === 'POST') return adminLogout();
 
       if (url.pathname.startsWith('/api/admin/')) {
         if (!(await isAdmin(request, env))) return json({error:'Unauthorized'},401);
+        await ensureSchema(env);
       }
 
       if (url.pathname === '/api/admin/me' && request.method === 'GET') return json({ok:true});
@@ -49,6 +53,7 @@ export default {
 };
 
 async function runEffectAPI(request, env) {
+  await ensureSchema(env);
   const user = await shortcutUser(request, env);
   if (!user) return cors(json({error:'Invalid API key'},401));
   if (!user.enabled) return cors(new Response(`(function(){try{if(typeof completion==='function')completion('Shortcut disabled')}catch(_){}})();`,{status:403,headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'}}));
@@ -72,6 +77,7 @@ async function runEffectAPI(request, env) {
 }
 
 async function receivePeek(request, env) {
+  await ensureSchema(env);
   const tokenData = await verifyRuntimeToken(bearerToken(request), env);
   if (!tokenData) return cors(json({error:'Invalid token'},401));
   const user = await env.DB.prepare('SELECT id,enabled,active_effect FROM users WHERE id=? LIMIT 1').bind(tokenData.userId).first();
@@ -83,11 +89,42 @@ async function receivePeek(request, env) {
 }
 
 async function adminLogin(request, env) {
+  if (!String(env.ADMIN_PASSWORD||'').trim()) {
+    return json({
+      error:'ADMIN_PASSWORD is not configured. Run: npx wrangler secret put ADMIN_PASSWORD'
+    },503);
+  }
+
   const body = await readJSON(request);
-  if (!(await secureEqual(String(body.password||''), String(env.ADMIN_PASSWORD||'')))) return json({error:'Invalid password'},401);
+  if (!(await secureEqual(String(body.password||''), String(env.ADMIN_PASSWORD)))) {
+    return json({error:'Invalid password'},401);
+  }
+
+  try {
+    await ensureSchema(env);
+  } catch (error) {
+    console.error('D1 initialization failed', error);
+    return json({
+      error:'Database is not configured correctly. Check the DB binding/database_id, then redeploy.'
+    },503);
+  }
+
   const expiry = Math.floor(Date.now()/1000)+12*60*60;
-  const signature = await sign('admin:'+expiry, env.SIGNING_SECRET);
-  return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json; charset=utf-8','Set-Cookie':`cds_admin=${expiry}.${signature}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200`,'Cache-Control':'no-store'}});
+  const signature = await sign('admin:'+expiry, signingSecret(env));
+  return new Response(JSON.stringify({
+    ok:true,
+    signingSecretFallback:!String(env.SIGNING_SECRET||'').trim()
+  }),{headers:{'Content-Type':'application/json; charset=utf-8','Set-Cookie':`cds_admin=${expiry}.${signature}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200`,'Cache-Control':'no-store'}});
+}
+
+function adminStatus(env) {
+  return json({
+    ok:true,
+    adminPasswordConfigured:!!String(env.ADMIN_PASSWORD||'').trim(),
+    signingSecretConfigured:!!String(env.SIGNING_SECRET||'').trim(),
+    databaseBound:!!env.DB,
+    mediaBound:!!env.MEDIA
+  });
 }
 function adminLogout(){return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json; charset=utf-8','Set-Cookie':'cds_admin=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0','Cache-Control':'no-store'}})}
 
@@ -156,12 +193,62 @@ async function serveMedia(request, env) {
 }
 
 async function shortcutUser(request, env){const key=request.headers.get('X-CDS-Key');if(!key||key.length>200)return null;return env.DB.prepare('SELECT id,name,enabled,active_effect,settings_json FROM users WHERE api_key_hash=? LIMIT 1').bind(await sha256Hex(key)).first();}
-async function isAdmin(request, env){const session=parseCookies(request.headers.get('Cookie')||'').cds_admin;if(!session)return false;const p=session.split('.');if(p.length!==2)return false;const expiry=Number(p[0]);if(!Number.isFinite(expiry)||expiry<Date.now()/1000)return false;return secureEqual(p[1],await sign('admin:'+expiry,env.SIGNING_SECRET));}
-async function createRuntimeToken(id,env){const expiry=Math.floor(Date.now()/1000)+3600, payload=`runtime:${id}:${expiry}`, sig=await sign(payload,env.SIGNING_SECRET);return `rt.${id}.${expiry}.${sig}`;}
-async function verifyRuntimeToken(token,env){if(!token)return null;const p=token.split('.');if(p.length!==4||p[0]!=='rt')return null;const expiry=Number(p[2]);if(!Number.isFinite(expiry)||expiry<Date.now()/1000)return null;const ok=await secureEqual(p[3],await sign(`runtime:${p[1]}:${expiry}`,env.SIGNING_SECRET));return ok?{userId:p[1],expiry}:null;}
+async function isAdmin(request, env){const session=parseCookies(request.headers.get('Cookie')||'').cds_admin;if(!session)return false;const p=session.split('.');if(p.length!==2)return false;const expiry=Number(p[0]);if(!Number.isFinite(expiry)||expiry<Date.now()/1000)return false;return secureEqual(p[1],await sign('admin:'+expiry,signingSecret(env)));}
+async function createRuntimeToken(id,env){const expiry=Math.floor(Date.now()/1000)+3600, payload=`runtime:${id}:${expiry}`, sig=await sign(payload,signingSecret(env));return `rt.${id}.${expiry}.${sig}`;}
+async function verifyRuntimeToken(token,env){if(!token)return null;const p=token.split('.');if(p.length!==4||p[0]!=='rt')return null;const expiry=Number(p[2]);if(!Number.isFinite(expiry)||expiry<Date.now()/1000)return null;const ok=await secureEqual(p[3],await sign(`runtime:${p[1]}:${expiry}`,signingSecret(env)));return ok?{userId:p[1],expiry}:null;}
 function parseSettings(raw){let parsed={};try{parsed=JSON.parse(raw||'{}')}catch{}return mergeSettings(DEFAULT_SETTINGS,parsed)}
 function mergeSettings(base,patch){const result=structuredClone(DEFAULT_SETTINGS);for(const effect of Object.keys(result))result[effect]={...result[effect],...(base?.[effect]||{})};if(patch.scratch){const c=normalizeCard(patch.scratch.card);if(c)result.scratch.card=c;}if(patch.product_letters)result.product_letters.name=normalizeName(patch.product_letters.name).slice(0,20);result.card_phone.imageKey=String(base?.card_phone?.imageKey||result.card_phone.imageKey||'');result.google_single.imageKey=String(base?.google_single?.imageKey||result.google_single.imageKey||'');return result;}
 function normalizeCard(v){v=String(v||'').toUpperCase().replace(/\s+/g,'');return /^(A|K|Q|J|10|[2-9])[SHDC]$/.test(v)?v:''} function normalizeName(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function signingSecret(env) {
+  const dedicated = String(env.SIGNING_SECRET||'').trim();
+  if (dedicated) return dedicated;
+  const fallback = String(env.ADMIN_PASSWORD||'').trim();
+  if (fallback) return fallback;
+  throw new Error('No signing secret available');
+}
+
+async function ensureSchema(env) {
+  if (!env.DB || typeof env.DB.prepare !== 'function') {
+    throw new Error('D1 binding DB is missing');
+  }
+
+  if (!schemaReadyPromise) {
+    schemaReadyPromise = env.DB.batch([
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        api_key_hash TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        active_effect TEXT NOT NULL DEFAULT 'scratch',
+        settings_json TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`),
+      env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)`),
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS letter_assets (
+        user_id TEXT NOT NULL,
+        letter TEXT NOT NULL,
+        r2_key TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, letter),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`),
+      env.DB.prepare(`CREATE TABLE IF NOT EXISTS peek_state (
+        user_id TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        is_done INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`)
+    ]).catch(error => {
+      schemaReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return schemaReadyPromise;
+}
+
 async function sha256Hex(value){const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(value)));return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 async function sign(text,secret){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(secret||'')),{name:'HMAC',hash:'SHA-256'},false,['sign']);return base64Url(new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(text))))}
 async function secureEqual(a,b){const [ah,bh]=await Promise.all([crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(a))),crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(b)))]);const aa=new Uint8Array(ah),bb=new Uint8Array(bh);let diff=0;for(let i=0;i<aa.length;i++)diff|=aa[i]^bb[i];return diff===0}
