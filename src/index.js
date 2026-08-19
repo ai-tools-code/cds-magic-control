@@ -1,5 +1,8 @@
 import { buildEffectScript } from './effects/index.js';
 
+const CDS_VERSION = '1.0.3';
+const RUN_CONTENT_TYPE = 'text/plain; charset=utf-8';
+
 const EFFECTS = new Set(['scratch','card_phone','google_single','peek','product_letters']);
 const DEFAULT_SETTINGS = {
   scratch:{card:'AH'},
@@ -20,6 +23,7 @@ export default {
       if (url.pathname === '/api/peek' && request.method === 'POST') return receivePeek(request, env);
       if (url.pathname.startsWith('/media/') && request.method === 'GET') return serveMedia(request, env);
       if (url.pathname === '/api/admin/status' && request.method === 'GET') return adminStatus(env);
+      if (url.pathname === '/api/debug/run-headers' && request.method === 'GET') return runHeadersDebug();
       if (url.pathname === '/api/admin/login' && request.method === 'POST') return adminLogin(request, env);
       if (url.pathname === '/api/admin/logout' && request.method === 'POST') return adminLogout();
 
@@ -56,7 +60,7 @@ async function runEffectAPI(request, env) {
   await ensureSchema(env);
   const user = await shortcutUser(request, env);
   if (!user) return cors(json({error:'Invalid API key'},401));
-  if (!user.enabled) return cors(new Response(`(function(){try{if(typeof completion==='function')completion('Shortcut disabled')}catch(_){}})();`,{status:403,headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'}}));
+  if (!user.enabled) return cors(new Response(`/* CDS Magic API v${CDS_VERSION} | text/plain */\n(function(){try{if(typeof completion==='function')completion('Shortcut disabled')}catch(_){}})();`,{status:403,headers:runTextHeaders()}));
   const settings = parseSettings(user.settings_json);
   const effect = EFFECTS.has(user.active_effect) ? user.active_effect : 'scratch';
   const config = {...(settings[effect]||{})};
@@ -73,7 +77,8 @@ async function runEffectAPI(request, env) {
   }
   const runtimeToken = await createRuntimeToken(user.id, env);
   const script = buildEffectScript({effect,config,baseUrl:origin,runtimeToken});
-  return cors(new Response(script,{headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store, no-cache, must-revalidate','Pragma':'no-cache','X-Content-Type-Options':'nosniff'}}));
+  const responseText = `/* CDS Magic API v${CDS_VERSION} | response=text/plain | effect=${effect} */\n${script}`;
+  return cors(new Response(responseText,{headers:runTextHeaders()}));
 }
 
 async function receivePeek(request, env) {
@@ -115,6 +120,30 @@ async function adminLogin(request, env) {
     ok:true,
     signingSecretFallback:!String(env.SIGNING_SECRET||'').trim()
   }),{headers:{'Content-Type':'application/json; charset=utf-8','Set-Cookie':`cds_admin=${expiry}.${signature}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200`,'Cache-Control':'no-store'}});
+}
+
+function runTextHeaders() {
+  return {
+    'Content-Type': RUN_CONTENT_TYPE,
+    'Content-Disposition': 'inline; filename=\"cds-effect.txt\"',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Pragma': 'no-cache',
+    'X-Content-Type-Options': 'nosniff',
+    'X-CDS-Version': CDS_VERSION,
+    'X-CDS-Response-Mode': 'plain-text'
+  };
+}
+
+function runHeadersDebug() {
+  return json({
+    ok: true,
+    version: CDS_VERSION,
+    endpoint: '/api/run',
+    contentType: RUN_CONTENT_TYPE,
+    contentDisposition: 'inline; filename=\"cds-effect.txt\"',
+    responseMode: 'plain-text',
+    note: 'After deploying v1.0.3, /api/run begins with a CDS Magic API v1.0.3 comment.'
+  });
 }
 
 function adminStatus(env) {
