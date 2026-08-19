@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>CDS Magic Control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="shell">
+  <section id="loginView" class="login-card">
+    <div class="brand-icon">✦</div><h1>CDS Magic</h1><p class="muted">Control Shortcut effects from one dashboard.</p>
+    <form id="loginForm"><label>Admin password</label><input id="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">Sign in</button></form>
+  </section>
+  <section id="appView" class="hidden">
+    <header class="topbar"><div><div class="eyebrow">CONTROL PANEL</div><h1>Magic Effects</h1></div><button id="logoutButton" class="secondary small">Log out</button></header>
+    <section class="create-card"><div><h2>Add Shortcut User</h2><p class="muted">A unique API key is shown only when created or rotated.</p></div><div class="create-row"><input id="newUserName" placeholder="User name" maxlength="80"><button id="createUser" class="primary">Add user</button></div></section>
+    <section id="users" class="users"></section>
+  </section>
+</main>
+<div id="toast" class="toast hidden"></div>
+<dialog id="keyDialog"><div class="dialog-content"><h2>Shortcut API Key</h2><p class="muted">Copy this now. The database stores only its SHA-256 hash.</p><textarea id="newKey" readonly></textarea><div class="dialog-actions"><button id="copyKey" class="primary">Copy</button><button id="closeKey" class="secondary">Close</button></div></div></dialog>
+<script src="/app.js" defer></script>
+</body>
+</html>

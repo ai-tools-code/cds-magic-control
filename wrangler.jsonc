@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cds-magic-control",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-19",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/media/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cds-magic",
+      "database_id": "7af1e421-449f-4635-bf59-29a05cd7c86c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "cds-magic-media"
+    }
+  ]
+}
