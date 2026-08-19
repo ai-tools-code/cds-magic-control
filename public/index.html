@@ -8,19 +8,79 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<main class="shell">
-  <section id="loginView" class="login-card">
-    <div class="brand-icon">✦</div><h1>CDS Magic</h1><p class="muted">Control Shortcut effects from one dashboard.</p>
-    <form id="loginForm"><label>Admin password</label><input id="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">Sign in</button></form>
-  </section>
-  <section id="appView" class="hidden">
-    <header class="topbar"><div><div class="eyebrow">CONTROL PANEL</div><h1>Magic Effects</h1></div><button id="logoutButton" class="secondary small">Log out</button></header>
-    <section class="create-card"><div><h2>Add Shortcut User</h2><p class="muted">A unique API key is shown only when created or rotated.</p></div><div class="create-row"><input id="newUserName" placeholder="User name" maxlength="80"><button id="createUser" class="primary">Add user</button></div></section>
-    <section id="users" class="users"></section>
-  </section>
-</main>
-<div id="toast" class="toast hidden"></div>
-<dialog id="keyDialog"><div class="dialog-content"><h2>Shortcut API Key</h2><p class="muted">Copy this now. The database stores only its SHA-256 hash.</p><textarea id="newKey" readonly></textarea><div class="dialog-actions"><button id="copyKey" class="primary">Copy</button><button id="closeKey" class="secondary">Close</button></div></div></dialog>
-<script src="/app.js" defer></script>
+  <main class="shell">
+    <section id="loginView" class="login-card">
+      <div class="brand-icon">✦</div>
+      <h1>CDS Magic</h1>
+      <p class="muted">Control your Shortcut effects.</p>
+      <div id="setupStatus" class="setup-status hidden"></div>
+      <form id="loginForm">
+        <label>Admin password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="appView" class="hidden">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">CONTROL PANEL</div>
+          <h1>Magic Effects</h1>
+          <div id="versionLabel" class="muted small-text"></div>
+        </div>
+        <button id="logoutButton" class="secondary small">Log out</button>
+      </header>
+
+      <section class="create-card">
+        <div>
+          <h2>Add Shortcut User</h2>
+          <p class="muted">A unique API key is generated once.</p>
+        </div>
+        <div class="create-row">
+          <input id="newUserName" placeholder="User name" maxlength="80">
+          <button id="createUser" class="primary">Add user</button>
+        </div>
+      </section>
+
+      <section class="user-card library-card">
+        <div class="library-header">
+          <div>
+            <div class="eyebrow">SHARED ASSETS</div>
+            <h2>Global A–Z Image Library</h2>
+            <p class="muted">Upload each letter once. Every Sponsored Products → Name effect uses this same library.</p>
+          </div>
+          <div id="libraryCount" class="status off">0 / 26</div>
+        </div>
+
+        <div class="bulk-upload">
+          <div>
+            <strong>Bulk upload</strong>
+            <div class="muted small-text">Select files named A.png, B.png … Z.png. JPEG/WebP also work.</div>
+          </div>
+          <input id="bulkLetterUpload" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+        </div>
+
+        <div id="letterLibrary" class="letters global-letters"></div>
+      </section>
+
+      <section id="users" class="users"></section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <dialog id="keyDialog">
+    <div class="dialog-content">
+      <h2>Shortcut API Key</h2>
+      <p class="muted">Copy this now. The database stores only its SHA-256 hash.</p>
+      <textarea id="newKey" readonly></textarea>
+      <div class="dialog-actions">
+        <button id="copyKey" class="primary">Copy</button>
+        <button id="closeKey" class="secondary">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/app.js" defer></script>
 </body>
 </html>
